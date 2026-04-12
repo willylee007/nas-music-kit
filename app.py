@@ -200,12 +200,15 @@ def get_extra_info(is_vip, source, track_id, br='999'):
                 size_bytes = data.get('size', 0)
                 size_mb = f"{size_bytes / (1024*1024):.2f}MB" if size_bytes else ""
                 br_val = int(data.get('br', 0))
-                # 统一显示中文
+                # 码率归一化：bps -> kbps (部分接口返回 320000)
+                if br_val > 5000: br_val //= 1000
+
+                # 统一显示中文 (基于范围判断以兼容真实变长码率)
                 if br == 'jymaster' or data.get('level') == 'jymaster': level = "超清母带"
-                elif br_val == 999: level = "Hi-Res音质"
-                elif br_val == 740: level = "无损音质"
-                elif br_val == 320: level = "极高音质"
-                elif br_val == 192: level = "较高音质"
+                elif br_val >= 999: level = "Hi-Res音质"
+                elif br_val >= 600: level = "无损音质"
+                elif br_val >= 320: level = "极高音质"
+                elif br_val >= 192: level = "较高音质"
                 else: level = "标准音质"
                 return {'size': size_mb, 'level': level}
     except:
