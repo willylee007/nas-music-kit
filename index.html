@@ -47,6 +47,16 @@
             display: flex;
             flex-direction: column;
             min-height: 100vh;
+            /* 禁止基础文案选中，增强 App 感 */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 允许输入框内的文字被选中 */
+        input,
+        textarea {
+            user-select: text;
+            -webkit-user-select: text;
         }
 
         .container {
