@@ -86,9 +86,11 @@ def extract_url(text: str):
 def resolve_url(url: str):
     """还原短链接获取真实地址"""
     try:
-        # 使用自定义 UA 避免被风控
-        resp = requests.head(url, headers=API_HEADERS, allow_redirects=True, timeout=5)
-        return resp.url
+        # 使用 GET (stream=True) 比 HEAD 更稳定，且只获取 Header 不下载 Body
+        resp = requests.get(url, headers=API_HEADERS, allow_redirects=True, timeout=5, stream=True)
+        real_url = resp.url
+        resp.close() # 及时关闭流连接
+        return real_url
     except:
         return url
 
@@ -105,8 +107,11 @@ def parse_music_link(text: str):
         url = resolve_url(url)
     
     # 网易云
-    if 'music.163.com' in url or '163.com' in url:
-        m = re.search(r'id=(\d+)', url)
+    if 'music.163.com' in url or '163.com' in url or '163cn.tv' in url:
+        if '163cn.tv' in url:
+            url = resolve_url(url)
+        # 提取 ID：支持 id=123 或 /song/123/ 模式
+        m = re.search(r'(?:id=|/song/)(\d+)', url)
         if m: return 'netease', m.group(1)
     
     # QQ 音乐
