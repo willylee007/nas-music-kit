@@ -293,7 +293,7 @@
             padding: 12px;
             border-radius: 12px;
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             gap: 12px;
             transition: all 0.2s;
             border: 1px solid var(--border);
@@ -352,6 +352,8 @@
             border-radius: 0 2px 0 0;
         }
 
+        /* 移动端特殊设计的进度条 - 已移除，统一使用底部直线 */
+
         /* 播放中：左侧边框高亮 */
         .track-card.playing {
             border-color: rgba(108, 92, 231, 0.5);
@@ -371,13 +373,20 @@
             min-width: 0;
         }
 
+        .track-name-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 2px;
+            overflow: hidden;
+        }
+
         .track-name {
             font-weight: 600;
             font-size: 0.95rem;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            margin-bottom: 2px;
         }
 
         .track-info .meta {
@@ -391,9 +400,9 @@
         }
 
         .badge-info {
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             padding: 2px 6px;
-            background: rgba(var(--accent-rgb), 0.1);
+            background: rgba(160, 160, 160, 0.1);
             color: var(--text-secondary);
             border: 1px solid var(--border);
             border-radius: 4px;
@@ -401,14 +410,13 @@
         }
 
         .badge-gold {
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             padding: 2px 6px;
             background: rgba(255, 215, 0, 0.1);
             color: #ffd700;
             border: 1px solid rgba(255, 215, 0, 0.4);
             border-radius: 4px;
             font-weight: 600;
-            text-transform: uppercase;
         }
 
         .track-meta {
@@ -438,30 +446,99 @@
             margin-left: auto;
         }
 
-        /* 移动端适配：改为两行 */
+        .pc-badges {
+            display: flex;
+            gap: 12px;
+            margin-right: 12px;
+        }
+
+        .mobile-badges {
+            display: none;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        /* 移动端适配：全新网格布局 */
         @media (max-width: 640px) {
             .track-card {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 10px;
-            }
-
-            .track-info {
-                width: 100%;
-            }
-
-            .download-wrapper {
-                width: 100%;
-                margin-left: 0;
-                justify-content: flex-start;
-                border-top: 1px solid var(--border);
-                padding-top: 10px;
-                margin-top: 2px;
+                display: grid;
+                grid-template-areas: 
+                    "cover info"
+                    "actions actions";
+                grid-template-columns: 80px 1fr;
+                gap: 12px;
+                padding: 15px;
+                align-items: center;
             }
 
             .cover-img {
+                grid-area: cover;
+                display: block !important;
+                width: 80px !important;
+                height: 80px !important;
+                border-radius: 8px;
+                opacity: 1 !important;
+            }
+
+            .track-info {
+                grid-area: info;
+                height: auto;
+                min-height: 80px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 8px;
+                padding: 0;
+            }
+
+            .track-name-row {
+                flex-wrap: nowrap;
+                width: 100%;
+            }
+
+            .track-name {
+                font-size: 1rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                flex: 1;
+            }
+
+            .track-info .meta {
+                justify-content: flex-start; /* 左对齐 */
+                text-align: left;
+                width: 100%;
+                flex-direction: row !important;
+                align-items: center !important;
+                gap: 6px !important;
+                font-size: 0.85rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: block; /* Ensure ellipsis works on single line */
+            }
+
+            .pc-badges {
+                display: none !important;
+            }
+
+            .mobile-badges {
+                display: flex !important;
+            }
+
+            .mobile-badges .badge-info {
                 display: none;
-                /* 移动端可隐藏或保持，这里根据需求决定是否保留 */
+            }
+
+            .download-wrapper {
+                grid-area: actions;
+                width: 100% !important;
+                justify-content: center !important; /* 底部居中 */
+                margin-left: 0 !important;
+                border-top: 1px solid var(--border) !important;
+                padding-top: 15px !important;
+                margin-top: 5px;
+                gap: 15px;
             }
         }
 
@@ -498,39 +575,6 @@
             cursor: default;
         }
 
-        /* 移动端适配：改为两行 */
-        @media (max-width: 640px) {
-            .track-card {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 12px;
-                padding: 15px;
-            }
-
-            .track-info {
-                width: 100%;
-            }
-
-            .meta {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 4px;
-            }
-
-            .download-wrapper {
-                width: 100%;
-                margin-left: 0 !important;
-                justify-content: flex-start !important;
-                border-top: 1px solid var(--border);
-                padding-top: 12px;
-                margin-top: 4px;
-            }
-
-            .cover-img {
-                width: 50px;
-                height: 50px;
-            }
-        }
 
         /* 试听按钮：播放中变为紫色 */
         .preview-btn.playing {
@@ -900,13 +944,18 @@
         // ── 搜索 ─────────────────────────────────────────────
         searchInput.addEventListener('keypress', e => { if (e.key === 'Enter') performSearch(); });
 
-        async function fetchTrackInfo(id, source, containerId, btn) {
-            const container = document.getElementById(containerId);
-            if (container.querySelector('.badge-info') || container.querySelector('.badge-gold')) return;
+        async function fetchTrackInfo(id, source, baseId, btn) {
+            const containers = [
+                document.getElementById(`${baseId}-pc`),
+                document.getElementById(`${baseId}-mobile`)
+            ].filter(el => el !== null);
+
+            // 检查是否已经加载过
+            if (containers.some(c => c.querySelector('.badge-info') || c.querySelector('.badge-gold'))) return;
 
             const originalHtml = btn.innerHTML;
             btn.innerHTML = `<i data-lucide="loader" class="spin-icon" style="width: 16px; height: 16px;"></i>`;
-            lucide.createIcons(); // 立即同步渲染图标渲染
+            lucide.createIcons();
             btn.classList.add('is-loading');
             btn.disabled = true;
 
@@ -918,8 +967,11 @@
                     let badges = '';
                     if (data.level) badges += `<span class="badge-gold">${data.level}</span>`;
                     if (data.size) badges += `<span class="badge-info">${data.size}</span>`;
-                    container.insertAdjacentHTML('beforeend', badges);
-                    // 移除 opacity = '0.3'，保持颜色一致
+                    
+                    containers.forEach(container => {
+                        container.innerHTML = ''; // 清空可能存在的旧内容
+                        container.insertAdjacentHTML('beforeend', badges);
+                    });
                 } else {
                     showToast('未能获取到详细信息', 'info');
                 }
@@ -1021,21 +1073,25 @@
                 const coverUrl = `/api/cover?source=${sourceSelect.value}&id=${picId}${IS_VIP ? '&vip=1' : ''}`;
 
                 // 预留显示额外信息的容器
-                const extraInfoId = `extra-${item.id}`;
+                const baseId = `badges-${item.id}`;
 
                 return `
                     <div class="track-card" id="card-${item.id}">
                         <img src="${coverUrl}" class="cover-img" loading="lazy" onerror="this.style.opacity=0">
                         <div class="track-info">
-                            <div class="track-name" title="${safeName}">${item.name}</div>
-                            <div class="meta" id="${extraInfoId}">
+                            <div class="track-name-row">
+                                <div class="track-name" title="${safeName}">${item.name}</div>
+                                <div id="${baseId}-mobile" class="mobile-badges"></div>
+                            </div>
+                            <div class="meta">
                                 <span class="clickable" onclick="performSearch('${safeArtist}')">${artists}</span> · 
                                 ${album ? `<span class="clickable" onclick="searchAlbum('${safeAlbum}')">${album}</span>` : 'Unknown'}
                             </div>
                         </div>
                         <div class="download-wrapper">
+                            <div id="${baseId}-pc" class="pc-badges"></div>
                             <button class="icon-btn info-btn" title="查看音质与文件大小"
-                                onclick="fetchTrackInfo('${item.id}', '${item.source}', '${extraInfoId}', this)">
+                                onclick="fetchTrackInfo('${item.id}', '${item.source}', '${baseId}', this)">
                                 <i data-lucide="info" style="width: 16px; height: 16px;"></i>
                             </button>
                             <button class="icon-btn preview-btn" id="preview-btn-${item.id}"

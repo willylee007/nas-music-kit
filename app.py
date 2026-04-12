@@ -167,9 +167,29 @@ def get_extra_info(is_vip, source, track_id, br='999'):
             data = resp.json()
             if data.get('code') == 200 or data.get('status') == 200:
                 d = data.get('data', data)
+                size_bytes = d.get('size', 0)
+                # 统一转换体积为 MB
+                try:
+                    size_mb = f"{int(size_bytes) / (1024*1024):.1f}MB" if size_bytes else ""
+                except:
+                    size_mb = str(size_bytes) if size_bytes else ""
+                
+                # 统一映射 BugPk level 为中文描述
+                level_raw = d.get('level', '')
+                level_map = {
+                    'standard': '标准音质',
+                    'exhigh': '极高音质',
+                    'lossless': '无损音质',
+                    'hires': 'Hi-Res音质',
+                    'jyeffect': '高清环绕',
+                    'sky': '全景环绕',
+                    'jymaster': '母带音质'
+                }
+                level = level_map.get(level_raw, level_raw)
+
                 return {
-                    'size': d.get('size', ''),
-                    'level': d.get('level', '') # BugPk 通常返回中文描述
+                    'size': size_mb,
+                    'level': level
                 }
         else:
             params = {'types': 'url', 'source': source, 'id': track_id, 'br': br}
@@ -303,6 +323,7 @@ def cover():
         return "", 404
 
     base, headers, is_bugpk = api_cfg(is_vip, source)
+    img_url = None
     try:
         # 1. 针对新版网易云 (netease2) 
         if is_bugpk:
@@ -311,19 +332,26 @@ def cover():
             if data.get('code') == 200:
                 d = data.get('data', {})
                 img_url = d.get('picimg') or d.get('picUrl') or d.get('pic')
-                if img_url: return redirect(img_url)
         
         # 2. 其他平台或 BugPk 降级
-        params = {'types': 'pic', 'source': source, 'id': pic_id, 'size': 300}
-        if is_vip: params['s'] = get_signature(pic_id)
+        if not img_url:
+            params = {'types': 'pic', 'source': source, 'id': pic_id, 'size': 300}
+            if is_vip: params['s'] = get_signature(pic_id)
+            
+            resp = requests.get(base, params=params, headers=headers, timeout=8)
+            data = resp.json()
+            
+            if isinstance(data, dict):
+                img_url = data.get('url') or (data.get('data', {}).get('picimg') if isinstance(data.get('data'), dict) else None)
         
-        resp = requests.get(base, params=params, headers=headers, timeout=8)
-        data = resp.json()
-        
-        # 统一处理重定向或解析
-        if isinstance(data, dict):
-            url = data.get('url') or (data.get('data', {}).get('picimg') if isinstance(data.get('data'), dict) else None)
-            if url: return redirect(url)
+        if img_url:
+            # 代理图片，解决移动端 Referer/Mixed Content 问题
+            img_resp = requests.get(img_url, headers=MEDIA_HEADERS, timeout=10)
+            if img_resp.status_code == 200:
+                return img_resp.content, 200, {
+                    'Content-Type': img_resp.headers.get('Content-Type', 'image/jpeg'),
+                    'Cache-Control': 'public, max-age=86400'  # 缓存 1 天
+                }
             
         return "", 404
     except:
