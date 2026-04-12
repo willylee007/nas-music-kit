@@ -1,45 +1,72 @@
 # NAS 音乐助手
+本项目基于 [GD 音乐台](https://music.gdstudio.org) 和 [BugPk-Api](https://api.bugpk.com/doc-163_music.html) 提供的 API（后续可能支持其他公开或自建 API），使用网页搜索或快捷指令，一键把喜欢的音乐入库 NAS。  
 
-本项目基于[GD 音乐台](https://music.gdstudio.org)提供的 API，我打包成了 Docker 容器，方便搜索歌曲，一键入库 NAS。  
+![预览](./static/demo.png)
 
-如果有帮助到你，请顺手点个`🌟Star`支持一下，或者直接[🧧打赏鼓励](https://juneix.github.io/donate.webp)，感谢！
+## ✨ 功能特色
+- 支持 PWA 网页，搜索多平台、高品质音乐
+- 支持 API / 快捷指令，一键分享并下载
+- 内嵌 ID3 标签，方便自动匹配元数据
+- 自动入库 Plex、Emby、Navidrome 等媒体库
 
-<img width="1780" height="1015" alt="demo" src="https://github.com/user-attachments/assets/43763cea-2129-4885-ac07-a1e8d5a0db3c" />
+## 📝 功能规划
+- [ ] 歌单、专辑批量下载
 
 ## 🎵 NAS 音乐方案
 顺便分享下我的自用方案，几乎`全平台`制霸了，但我不是发烧友，音乐爱好者可参考吧。此方案涉及的所有工具基础功能`完全免费`，目前可实现一键入库，自动匹配音乐元数据。
-- 媒体库（服务端）：[Plex](https://www.plex.tv/media-server-downloads)
-  - Win、Mac、Linux、NAS、Docker、Android 等
-- 播放器（客户端）：[Plexamp](https://www.plex.tv/plexamp/)
-  - Win、Mac、Linux、iOS（支持 CarPlay）、Android、网页、树莓派/Armbian盒子
-- 元数据管理：自动匹配 [Plex 网易云插件](https://github.com/timmy0209/WangYiYun.bundle)、增强匹配 [Music Tag Web 音乐标签](https://github.com/xhongc/music-tag-web)
-- 多房间播放：我的另一个项目[Plexamp Cast](https://github.com/juneix/plexamp-cast)
 
-## ⚠️ 注意事项
-> 请各位大 UP、KOL 不要在国内自媒体、社群、论坛公开传播此项目。如果被盯上了，广大网友会谢谢你全家的。😅
-- 由于某些你懂的原因，建议让你的 NAS 接入国际互联网，解锁所有音源
-- API 访问频率限制（动态更新）：5 分钟内不超 50 次请求
-- 如果依然无法使用，请前往原作者站点查看原因
+![Plexamp](./static/plexamp.png)
+
+- 媒体库（服务端）：[Plex](https://www.plex.tv/media-server-downloads)
+  - Win、Mac、Linux（NAS 套件、Docker）、Android 等
+- 播放器（客户端）：[Plexamp](https://www.plex.tv/plexamp/)
+  - Win、Mac、Linux（树莓派、Docker）、iOS、Android、网页、车机等
+  - 支持多设备推送、控制播放等
+- 元数据管理：
+	- 自动匹配：[Plex 网易云插件](https://github.com/timmy0209/WangYiYun.bundle)
+	- 增强匹配：[Music Tag Web 音乐标签](https://github.com/xhongc/music-tag-web)
+- 多房间播放：
+	- AirPlay 2：[Shairport Sync](https://github.com/mikebrady/shairport-sync)
+	- 我开发的另一个项目：[Plexamp-Cast](https://github.com/juneix/plexamp-cast)
 
 ## 🧩 快速部署
-Docker Compose 配置文件，各种 NAS 系统可一键抄作业，同时支持 `x86-64` 和 `arm64` 架构，自动识别。  
-
 ```yaml
 services:
   nas-music-kit:
-    # 毫秒镜像加速请换成 ghcr.1ms.run/ghcr.io/juneix/nas-music-kit
     image: ghcr.io/juneix/nas-music-kit
+    # image: docker.1ms.run/juneix/nas-music-kit  # 毫秒镜像加速
     container_name: nas-music-kit
     network_mode: host
     restart: unless-stopped
     environment:
-      - PORT=8000 #自定义端口号
-      # 如需访问国际互联网，请配置以下内容并取消注释
-      # - HTTP_PROXY=http://10.1.1.4:9110
-      # - HTTPS_PROXY=http://10.1.1.4:9110
-      # - NO_PROXY=172.17.0.1,127.0.0.1,localhost
+      - PORT=8848 #自定义端口号
     volumes:
       # - /vol1/1000/music:/music # 飞牛示例
       # - /volume1/music:/music # 群晖示例
       - ./music:/music #映射你的 NAS 音乐文件夹
 ```
+
+## ⚠️ 注意事项
+> 低调使用，请勿在国内论坛、社群公开传播此项目。😅
+- API 访问频率限制（动态更新）：5 分钟内不超 50 次请求
+- 如果依然无法使用，请前往原作者 API 站点查看原因
+
+## ❤️ 支持项目
+- 打赏鼓励：支持我开发更多有趣应用
+- 互动群聊：加入 💬 [QQ 群](https://qm.qq.com/q/ZzOD5Qbhce) 可在线催更
+- 更多内容：访问 ➡️ [谢週五の藏经阁](https://5nav.eu.org)
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <img src="./static/wechat.webp" width="128" /><br/>
+        <sub>微信</sub>
+      </td>
+      <td align="center">
+        <img src="./static/alipay.webp" width="128" /><br/>
+        <sub>支付宝</sub>
+      </td>
+    </tr>
+  </table>
+</div>

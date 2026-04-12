@@ -1,10 +1,13 @@
 services:
   nas-music-kit:
     image: ghcr.io/juneix/nas-music-kit
+    # image: docker.1ms.run/juneix/nas-music-kit  # 毫秒镜像加速
     container_name: nas-music-kit
     network_mode: host
     restart: unless-stopped
     environment:
-      - PORT=8000 #自定义端口号
+      - PORT=8848 #自定义端口号
     volumes:
+      # - /vol1/1000/music:/music # 飞牛示例
+      # - /volume1/music:/music # 群晖示例
       - ./music:/music #映射你的 NAS 音乐文件夹

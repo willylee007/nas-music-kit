@@ -1,0 +1,21 @@
+{
+  "name": "NAS 音乐助手",
+  "short_name": "NAS 音乐助手",
+  "description": "搜索高品质音乐，一键入库 NAS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1d232a",
+  "theme_color": "#1d232a",
+  "icons": [
+    {
+      "src": "/static/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
