@@ -462,7 +462,7 @@
         @media (max-width: 640px) {
             .track-card {
                 display: grid;
-                grid-template-areas: 
+                grid-template-areas:
                     "cover info"
                     "actions actions";
                 grid-template-columns: 80px 1fr;
@@ -505,7 +505,8 @@
             }
 
             .track-info .meta {
-                justify-content: flex-start; /* 左对齐 */
+                justify-content: flex-start;
+                /* 左对齐 */
                 text-align: left;
                 width: 100%;
                 flex-direction: row !important;
@@ -515,7 +516,8 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                display: block; /* Ensure ellipsis works on single line */
+                display: block;
+                /* Ensure ellipsis works on single line */
             }
 
             .pc-badges {
@@ -533,7 +535,8 @@
             .download-wrapper {
                 grid-area: actions;
                 width: 100% !important;
-                justify-content: center !important; /* 底部居中 */
+                justify-content: center !important;
+                /* 底部居中 */
                 margin-left: 0 !important;
                 border-top: 1px solid var(--border) !important;
                 padding-top: 15px !important;
@@ -869,7 +872,7 @@
                         <label class="option-label">音质</label>
                         <select id="quality-select" class="select-input">
                             {% if vip_mode %}
-                            <option value="2000">超清母带 💎</option>
+                            <option value="jymaster">超清母带 👑</option>
                             {% endif %}
                             <option value="999" selected>无损 24bit 💎</option>
                             <option value="740">无损 16bit ⭐️</option>
@@ -967,7 +970,7 @@
                     let badges = '';
                     if (data.level) badges += `<span class="badge-gold">${data.level}</span>`;
                     if (data.size) badges += `<span class="badge-info">${data.size}</span>`;
-                    
+
                     containers.forEach(container => {
                         container.innerHTML = ''; // 清空可能存在的旧内容
                         container.insertAdjacentHTML('beforeend', badges);

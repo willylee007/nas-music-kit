@@ -146,7 +146,6 @@ def get_extra_info(is_vip, source, track_id, br='999'):
     base, headers, is_bugpk = api_cfg(is_vip, source)
     try:
         if is_bugpk:
-            # BugPk 支持的 level 列表
             bugpk_levels = ['standard', 'exhigh', 'lossless', 'hires', 'jyeffect', 'sky', 'jymaster']
             
             # 如果传入的本身就是合法的 BugPk level 字符串，则直接使用
@@ -157,10 +156,10 @@ def get_extra_info(is_vip, source, track_id, br='999'):
                 try: bitrate = int(br)
                 except: bitrate = 999
                 
-                if bitrate >= 999:  level = 'hires'
-                elif bitrate >= 740:  level = 'lossless'
-                elif bitrate >= 320:  level = 'exhigh'
-                else: level = 'standard'
+                if bitrate == 999:  level = 'hires'
+                elif bitrate == 740:  level = 'lossless'
+                elif bitrate == 320:  level = 'exhigh'
+                else: level = 'standard' # 192 和 128 默认使用 standard
             
             params = {'type': 'json', 'ids': track_id, 'level': level}
             resp = requests.get(base, params=params, headers=headers, timeout=3)
@@ -170,7 +169,7 @@ def get_extra_info(is_vip, source, track_id, br='999'):
                 size_bytes = d.get('size', 0)
                 # 统一转换体积为 MB
                 try:
-                    size_mb = f"{int(size_bytes) / (1024*1024):.1f}MB" if size_bytes else ""
+                    size_mb = f"{int(size_bytes) / (1024*1024):.2f}MB" if size_bytes else ""
                 except:
                     size_mb = str(size_bytes) if size_bytes else ""
                 
@@ -178,12 +177,13 @@ def get_extra_info(is_vip, source, track_id, br='999'):
                 level_raw = d.get('level', '')
                 level_map = {
                     'standard': '标准音质',
+                    '192': '较高音质',
                     'exhigh': '极高音质',
                     'lossless': '无损音质',
                     'hires': 'Hi-Res音质',
-                    'jyeffect': '高清环绕',
-                    'sky': '全景环绕',
-                    'jymaster': '母带音质'
+                    'jyeffect': '高清臻音',
+                    'sky': '沉浸环绕声',
+                    'jymaster': '超清母带'
                 }
                 level = level_map.get(level_raw, level_raw)
 
@@ -198,12 +198,14 @@ def get_extra_info(is_vip, source, track_id, br='999'):
             data = resp.json()
             if data and data.get('url'):
                 size_bytes = data.get('size', 0)
-                size_mb = f"{size_bytes / (1024*1024):.1f}MB" if size_bytes else ""
+                size_mb = f"{size_bytes / (1024*1024):.2f}MB" if size_bytes else ""
                 br_val = int(data.get('br', 0))
                 # 统一显示中文
-                if br_val >= 999: level = "Hi-Res音质"
-                elif br_val >= 740: level = "无损音质"
-                elif br_val >= 320: level = "极高音质"
+                if br == 'jymaster' or data.get('level') == 'jymaster': level = "超清母带"
+                elif br_val == 999: level = "Hi-Res音质"
+                elif br_val == 740: level = "无损音质"
+                elif br_val == 320: level = "极高音质"
+                elif br_val == 192: level = "较高音质"
                 else: level = "标准音质"
                 return {'size': size_mb, 'level': level}
     except:
@@ -700,7 +702,7 @@ def get_openapi_spec(is_vip=False):
             "- `320 | exhigh` (极高音质)\n"
             "- `740 | lossless` (无损音质)\n"
             "- `999 | hires` (Hi-Res音质)\n"
-            "- `jyeffect` (高清环绕声)\n"
+            "- `jyeffect` (高清臻音)\n"
             "- `sky` (沉浸环绕声)\n"
             "- `jymaster` (超清母带)"
         )
