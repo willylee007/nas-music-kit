@@ -27,7 +27,7 @@
 	- 增强匹配：[Music Tag Web 音乐标签](https://github.com/xhongc/music-tag-web)
 - 多房间播放：
 	- AirPlay 2：[Shairport Sync](https://github.com/mikebrady/shairport-sync)
-	- 我开发的另一个项目：[Plexamp-Cast](https://github.com/juneix/plexamp-cast)
+	- 个人开发项目：[Plexamp-Cast](https://github.com/juneix/plexamp-cast)
 
 ## 🧩 快速部署
 ```yaml
