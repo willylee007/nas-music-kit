@@ -223,23 +223,41 @@ def get_song_metadata_internal(is_vip, source, track_id):
     """内部元数据抓取：用于在下载任务缺少信息时自动补全。"""
     try:
         if source in ['netease', 'netease2']:
-            resp = requests.get(API_BUGPK, params={'type': 'song', 'id': track_id}, timeout=3)
+            resp = requests.get(API_BUGPK, params={'type': 'song', 'ids': track_id}, timeout=8) # 修正参数名为 ids, 并增加超时时间
             data = resp.json()
             if data.get('code') == 200:
                 d = data.get('data', {})
                 return {'name': d.get('name', ''), 'artist': d.get('singer', ''), 'album': d.get('album', ''), 'pic_id': d.get('picimg', '')}
         
-        base, headers, _ = api_cfg(is_vip, source)
-        search_params = {'types': 'search', 'source': source, 'name': track_id, 'count': 1}
-        if is_vip: search_params['s'] = get_signature(track_id)
+        base, headers, is_bugpk = api_cfg(is_vip, source)
+        # 针对 BugPk 搜索参数对齐
+        if is_bugpk:
+            search_params = {'type': 'search', 'keywords': track_id, 'limit': 5}
+        else:
+            search_params = {'types': 'search', 'source': source, 'name': track_id, 'count': 5}
+            if is_vip: search_params['s'] = get_signature(track_id)
+            
         resp = requests.get(base, params=search_params, headers=headers, timeout=3)
-        results = resp.json()
-        if isinstance(results, list) and len(results) > 0:
-            item = results[0]
+        data = resp.json()
+        
+        # 处理搜索回退的结果
+        results = []
+        if is_bugpk:
+            if data.get('code') == 200:
+                results = data.get('data', {}).get('songs', [])
+        else:
+            results = data if isinstance(data, list) else []
+
+        for item in results:
             if str(item.get('id')) == str(track_id):
-                artist_val = item.get('artist', [])
+                artist_val = item.get('artist', []) if not is_bugpk else item.get('artists', [])
                 artist_name = ", ".join(artist_val) if isinstance(artist_val, list) else str(artist_val)
-                return {'name': item.get('name', ''), 'artist': artist_name, 'album': item.get('album', ''), 'pic_id': item.get('pic_id', '')}
+                return {
+                    'name': item.get('name', ''), 
+                    'artist': artist_name, 
+                    'album': item.get('album', ''), 
+                    'pic_id': item.get('pic_id', item.get('id', ''))
+                }
     except: pass
     return None
 
@@ -337,7 +355,7 @@ def cover():
     try:
         # 1. 针对新版网易云 (netease2) 
         if is_bugpk:
-            resp = requests.get(base, params={'type': 'song', 'id': pic_id}, headers=headers, timeout=8)
+            resp = requests.get(base, params={'type': 'song', 'ids': pic_id}, headers=headers, timeout=8) # 修正参数为 ids
             data = resp.json()
             if data.get('code') == 200:
                 d = data.get('data', {})
@@ -462,7 +480,7 @@ def preview():
             level = 'standard'
             if br == '320': level = 'exhigh'
             elif br in ['740', '999', '2000']: level = 'lossless'
-            params = {'type': 'url', 'id': track_id, 'level': level}
+            params = {'type': 'url', 'ids': track_id, 'level': level} # 修正参数为 ids
         else:
             params = {
                 'types': 'url',
@@ -510,7 +528,7 @@ def download_lyric_endpoint():
     base, headers, is_bugpk = api_cfg(is_vip, source)
     try:
         if is_bugpk:
-            params = {'type': 'lyric', 'id': track_id}
+            params = {'type': 'lyric', 'ids': track_id} # 修正参数为 ids
         else:
             params = {
                 'types': 'lyric',
@@ -602,7 +620,7 @@ def _handle_download_core(source, track_id, name=None, artist='Unknown', album='
             try:
                 if is_bugpk:
                     lv = br_val if isinstance(br_val, str) else ('hires' if br_val >= 999 else ('lossless' if br_val >= 740 else ('exhigh' if br_val >= 320 else 'standard')))
-                    p = {'type': 'url', 'id': track_id, 'level': lv}
+                    p = {'type': 'url', 'ids': track_id, 'level': lv} # 修正参数为 ids
                 else:
                     p = {'types': 'url', 'source': sid, 'id': track_id, 'br': br_val}
                     if is_vip: p['s'] = get_signature(track_id)
@@ -629,7 +647,7 @@ def _handle_download_core(source, track_id, name=None, artist='Unknown', album='
     if pic_id:
         try:
             if final_is_bugpk:
-                p_data = requests.get(API_BUGPK, params={'type': 'song', 'id': track_id}, timeout=8).json()
+                p_data = requests.get(API_BUGPK, params={'type': 'song', 'ids': track_id}, timeout=8).json() # 修正参数为 ids
                 pic_url = p_data.get('data', {}).get('picimg', '') if p_data.get('code') == 200 else ''
             else:
                 p_p = {'types': 'pic', 'source': final_sid, 'id': pic_id, 'size': 300}
@@ -642,7 +660,7 @@ def _handle_download_core(source, track_id, name=None, artist='Unknown', album='
 
     lyric_text = None
     try:
-        l_p = {'type': 'lyric', 'id': track_id} if final_is_bugpk else {'types': 'lyric', 'source': final_sid, 'id': track_id}
+        l_p = {'type': 'lyric', 'ids': track_id} if final_is_bugpk else {'types': 'lyric', 'source': final_sid, 'id': track_id} # 修正 BugPk 参数为 ids
         if not final_is_bugpk and is_vip: l_p['s'] = get_signature(track_id)
         l_d = requests.get(base, params=l_p, headers=final_headers, timeout=10).json()
         raw_lrc = (l_d.get('data', {}).get('lrc', '') if final_is_bugpk else l_d.get('lyric', ''))
