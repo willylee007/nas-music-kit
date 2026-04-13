@@ -324,23 +324,30 @@
             content: '';
             position: absolute;
             inset: 0;
-            background: linear-gradient(90deg,
-                    rgba(108, 92, 231, 0.0) 0%,
-                    rgba(108, 92, 231, 0.2) 50%,
-                    rgba(108, 92, 231, 0.0) 100%);
+            background: linear-gradient(110deg,
+                    transparent 40%,
+                    rgba(108, 92, 231, 0.1) 45%,
+                    rgba(108, 92, 231, 0.3) 50%,
+                    rgba(108, 92, 231, 0.1) 55%,
+                    transparent 60%);
             background-size: 200% 100%;
-            animation: shimmer 1.5s infinite linear;
+            animation: wave 4s infinite linear;
             z-index: -1;
             pointer-events: none;
+            opacity: 0.6;
         }
 
-        @keyframes shimmer {
+        @keyframes wave {
             0% {
                 background-position: 200% 0;
+                opacity: 0.1;
             }
-
+            50% {
+                opacity: 0.5;
+            }
             100% {
-                background-position: -200% 0;
+                background-position: -120% 0;
+                opacity: 0.1;
             }
         }
 
@@ -597,15 +604,16 @@
         }
 
         .download-btn.done {
-            background: rgba(0, 184, 148, 0.1);
-            color: var(--success);
-            border-color: var(--success);
+            background: rgba(0, 184, 148, 0.15);
+            color: #00d2ad;
+            border-color: #00d2ad;
             cursor: default;
         }
 
         /* 旋转动画 */
         .spin-icon {
             animation: spin 1s linear infinite;
+            color: #ffd700;
         }
 
         @keyframes spin {
@@ -933,6 +941,7 @@
         const SVG_CHECK = `<i data-lucide="check" style="width: 16px; height: 16px;"></i>`;
         const SVG_CROSS = `<i data-lucide="x" style="width: 16px; height: 16px;"></i>`;
         const SVG_DOWNLOAD = `<i data-lucide="download" style="width: 20px; height: 20px;"></i>`;
+        const SVG_LOADER = `<i data-lucide="loader" class="spin-icon" style="width: 16px; height: 16px;"></i>`;
 
         // 接口模式标识
         const IS_VIP = {{ 'true' if vip_mode else 'false' }};
@@ -1105,7 +1114,7 @@
                             <div id="${baseId}-pc" class="pc-badges"></div>
                             <button class="icon-btn info-btn" title="查看音质与文件大小"
                                 onclick="fetchTrackInfo('${item.id}', '${item.source}', '${baseId}', this)">
-                                <i data-lucide="info" style="width: 16px; height: 16px;"></i>
+                                <i data-lucide="file-search-corner" style="width: 16px; height: 16px;"></i>
                             </button>
                             <button class="icon-btn preview-btn" id="preview-btn-${item.id}"
                                 title="试听"
@@ -1272,8 +1281,12 @@
         async function startDownload(id, source, name, artist, album, picId, btn) {
             const br = qualitySelect.value;
             const card = getCard(id);
+            const originalHTML = btn.innerHTML;
 
+            btn.innerHTML = SVG_LOADER;
+            lucide.createIcons();
             btn.disabled = true;
+            btn.classList.add('is-loading');
             card.classList.add('downloading');
             card.classList.remove('failed');
 
@@ -1284,7 +1297,6 @@
                     body: JSON.stringify({ source, id, name, artist, album, pic_id: picId, br, lyric: true, vip: IS_VIP })
                 });
                 const data = await res.json();
-                card.classList.remove('downloading');
 
                 if (res.ok) {
                     showToast(`✅ 下载成功: ${data.filename}`, 'success');
@@ -1298,11 +1310,20 @@
                     btn.innerHTML = SVG_CROSS;
                     lucide.createIcons();
                 }
-            } catch {
+            } catch (err) {
+                console.error(err);
                 showToast('❌ 网络请求错误', 'error');
-                card.classList.remove('downloading');
                 btn.disabled = false;
                 btn.classList.add('failed');
+                btn.innerHTML = SVG_CROSS;
+                lucide.createIcons();
+            } finally {
+                card.classList.remove('downloading');
+                btn.classList.remove('is-loading');
+                if (!btn.classList.contains('done') && !btn.classList.contains('failed')) {
+                    btn.innerHTML = originalHTML;
+                    btn.disabled = false;
+                }
             }
         }
 
