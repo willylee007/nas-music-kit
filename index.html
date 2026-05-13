@@ -291,6 +291,86 @@
             border-color: var(--accent);
         }
 
+        .text-input {
+            cursor: text;
+        }
+
+        .batch-toolbar {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .batch-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .batch-btn {
+            background: var(--input-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .batch-btn:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .batch-btn.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .batch-btn.primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+            color: white;
+        }
+
+        .batch-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .selected-count {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .track-select-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .track-select {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        .track-card.selected {
+            border-color: rgba(108, 92, 231, 0.65);
+            background: rgba(108, 92, 231, 0.08);
+        }
+
         /* ── 结果列表 ── */
         #results-container {
             display: flex;
@@ -480,12 +560,16 @@
             .track-card {
                 display: grid;
                 grid-template-areas:
-                    "cover info"
-                    "actions actions";
-                grid-template-columns: 80px 1fr;
+                    "select cover info"
+                    "actions actions actions";
+                grid-template-columns: 24px 80px 1fr;
                 gap: 12px;
                 padding: 15px;
                 align-items: center;
+            }
+
+            .track-select-wrap {
+                grid-area: select;
             }
 
             .cover-img {
@@ -899,6 +983,11 @@
                             <option value="128">标准 128k</option>
                         </select>
                     </div>
+
+                    <div class="option-group">
+                        <label class="option-label">目录</label>
+                        <input type="text" id="download-subdir" class="select-input text-input" placeholder="例如: rock/2026" autocomplete="off">
+                    </div>
                 </div>
             </div>
 
@@ -954,6 +1043,7 @@
         const loading = document.getElementById('loading');
         const toast = document.getElementById('toast');
         const qualitySelect = document.getElementById('quality-select');
+        const downloadSubdirInput = document.getElementById('download-subdir');
         const pagination = document.getElementById('pagination');
         const audioEl = document.getElementById('audio-el');
 
@@ -962,6 +1052,9 @@
 
         let currentPage = 1;
         let currentQuery = '';
+        let currentResults = [];
+        let selectedTrackKeys = new Set();
+        let batchDownloading = false;
 
         // ── 搜索 ─────────────────────────────────────────────
         searchInput.addEventListener('keypress', e => { if (e.key === 'Enter') performSearch(); });
@@ -1015,7 +1108,7 @@
             if (query.startsWith('http') || query.includes('163cn.tv') || query.includes('y.qq.com')) {
                 showToast("检测到分享链接，正在尝试快速解析下载...");
                 try {
-                    const res = await fetch(`/api/workflow?text=${encodeURIComponent(query)}&br=${qualitySelect.value}&vip=${IS_VIP ? '1' : '0'}`);
+                    const res = await fetch(`/api/workflow?text=${encodeURIComponent(query)}&br=${qualitySelect.value}&vip=${IS_VIP ? '1' : '0'}&subdir=${encodeURIComponent(getDownloadSubdir())}`);
                     const data = await res.json();
                     if (data.status === 'success') {
                         showToast(`🚀 下载成功：${data.filename}`, 'success');
@@ -1037,6 +1130,8 @@
 
             // 停止当前播放（翻页/新搜索时）
             stopCurrent();
+            selectedTrackKeys.clear();
+            currentResults = [];
 
             resultsContainer.innerHTML = '';
             document.getElementById('pagination-wrapper').classList.add('hidden');
@@ -1079,59 +1174,148 @@
         }
 
         // ── 渲染结果 ─────────────────────────────────────────
+        function normalizeTrack(item) {
+            const artists = Array.isArray(item.artist) ? item.artist.join(', ') : (item.artist || 'Unknown');
+            const album = item.album || '';
+            const source = item.source || sourceSelect.value;
+            return {
+                id: item.id,
+                source,
+                name: item.name || '',
+                artist: artists,
+                album,
+                pic_id: item.pic_id || item.id || '',
+                key: `${source}:${item.id}`
+            };
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function eventArg(value) {
+            return escapeHtml(JSON.stringify(String(value ?? '')));
+        }
+
         function renderResults(list) {
-            if (list.length === 0) {
+            currentResults = list.map(normalizeTrack);
+            selectedTrackKeys.clear();
+
+            if (currentResults.length === 0) {
                 resultsContainer.innerHTML = '<div class="no-results">未找到结果。</div>';
                 return;
             }
 
-            resultsContainer.innerHTML = list.map(item => {
-                const artists = item.artist ? item.artist.join(', ') : 'Unknown';
-                const album = item.album || '';
-                const safeName = item.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                const safeArtist = artists.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                const safeAlbum = album.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                const picId = item.pic_id || item.id || '';
-                const coverUrl = `/api/cover?source=${sourceSelect.value}&id=${picId}${IS_VIP ? '&vip=1' : ''}`;
+            const toolbar = `
+                <div class="batch-toolbar">
+                    <span class="selected-count" id="selected-count">已选 0 首</span>
+                    <div class="batch-actions">
+                        <button class="batch-btn" onclick="selectAllResults()">全选</button>
+                        <button class="batch-btn" onclick="clearSelection()">清空</button>
+                        <button class="batch-btn primary" id="batch-download-btn" onclick="downloadSelectedTracks()" disabled>下载选中</button>
+                    </div>
+                </div>`;
 
-                // 预留显示额外信息的容器
-                const baseId = `badges-${item.id}`;
+            const cards = currentResults.map(track => {
+                const displayName = escapeHtml(track.name);
+                const displayArtist = escapeHtml(track.artist);
+                const displayAlbum = escapeHtml(track.album);
+                const safeName = eventArg(track.name);
+                const safeArtist = eventArg(track.artist);
+                const safeAlbum = eventArg(track.album);
+                const safeId = eventArg(track.id);
+                const safeSource = eventArg(track.source);
+                const safePicId = eventArg(track.pic_id);
+                const safeKey = eventArg(track.key);
+                const attrKey = escapeHtml(track.key);
+                const coverUrl = `/api/cover?source=${encodeURIComponent(track.source)}&id=${encodeURIComponent(track.pic_id)}${IS_VIP ? '&vip=1' : ''}`;
+                const baseId = `badges-${track.source}-${track.id}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 
                 return `
-                    <div class="track-card" id="card-${item.id}">
+                    <div class="track-card" id="card-${escapeHtml(track.id)}" data-key="${attrKey}">
+                        <label class="track-select-wrap" title="选择歌曲">
+                            <input type="checkbox" class="track-select" data-key="${attrKey}" onchange="toggleTrackSelection(${safeKey}, this.checked)">
+                        </label>
                         <img src="${coverUrl}" class="cover-img" loading="lazy" onerror="this.style.opacity=0">
                         <div class="track-info">
                             <div class="track-name-row">
-                                <div class="track-name" title="${safeName}">${item.name}</div>
+                                <div class="track-name" title="${displayName}">${displayName}</div>
                                 <div id="${baseId}-mobile" class="mobile-badges"></div>
                             </div>
                             <div class="meta">
-                                <span class="clickable" onclick="performSearch('${safeArtist}')">${artists}</span> · 
-                                ${album ? `<span class="clickable" onclick="searchAlbum('${safeAlbum}')">${album}</span>` : 'Unknown'}
+                                <span class="clickable" onclick="performSearch(${safeArtist})">${displayArtist}</span> ·
+                                ${track.album ? `<span class="clickable" onclick="searchAlbum(${safeAlbum})">${displayAlbum}</span>` : 'Unknown'}
                             </div>
                         </div>
                         <div class="download-wrapper">
                             <div id="${baseId}-pc" class="pc-badges"></div>
                             <button class="icon-btn info-btn" title="查看音质与文件大小"
-                                onclick="fetchTrackInfo('${item.id}', '${item.source}', '${baseId}', this)">
+                                onclick="fetchTrackInfo(${safeId}, ${safeSource}, '${baseId}', this)">
                                 <i data-lucide="file-search-corner" style="width: 16px; height: 16px;"></i>
                             </button>
-                            <button class="icon-btn preview-btn" id="preview-btn-${item.id}"
+                            <button class="icon-btn preview-btn" id="preview-btn-${escapeHtml(track.id)}"
                                 title="试听"
-                                onclick="togglePreview('${item.id}', '${item.source}', '${safeName}', '${safeArtist}', '${picId}', this)">
+                                onclick="togglePreview(${safeId}, ${safeSource}, ${safeName}, ${safeArtist}, ${safePicId}, this)">
                                 ${SVG_PLAY}
                             </button>
                             <button class="icon-btn" title="仅下载歌词"
-                                onclick="downloadLyricOnly('${item.id}', '${item.source}', '${safeName}', '${safeArtist}', this)">
+                                onclick="downloadLyricOnly(${safeId}, ${safeSource}, ${safeName}, ${safeArtist}, this)">
                                 <i data-lucide="mic-vocal" style="width: 16px; height: 16px;"></i>
                             </button>
-                            <button class="icon-btn download-btn" title="下载歌曲 & 歌词（内嵌 ID3 标签）"
-                                onclick="startDownload('${item.id}', '${item.source}', '${safeName}', '${safeArtist}', '${safeAlbum}', '${picId}', this)">
+                            <button class="icon-btn download-btn" title="下载歌曲"
+                                onclick="startDownload(${safeId}, ${safeSource}, ${safeName}, ${safeArtist}, ${safeAlbum}, ${safePicId}, this)">
                                 ${SVG_DOWNLOAD}
                             </button>
                         </div>
                     </div>`;
             }).join('');
+
+            resultsContainer.innerHTML = toolbar + cards;
+            updateSelectionUI();
+        }
+
+        function toggleTrackSelection(key, checked) {
+            if (checked) selectedTrackKeys.add(key);
+            else selectedTrackKeys.delete(key);
+            updateSelectionUI();
+        }
+
+        function selectAllResults() {
+            currentResults.forEach(track => selectedTrackKeys.add(track.key));
+            updateSelectionUI();
+        }
+
+        function clearSelection() {
+            selectedTrackKeys.clear();
+            updateSelectionUI();
+        }
+
+        function updateSelectionUI() {
+            document.querySelectorAll('.track-select').forEach(input => {
+                input.checked = selectedTrackKeys.has(input.dataset.key);
+            });
+            document.querySelectorAll('.track-card[data-key]').forEach(card => {
+                card.classList.toggle('selected', selectedTrackKeys.has(card.dataset.key));
+            });
+
+            const count = selectedTrackKeys.size;
+            const countEl = document.getElementById('selected-count');
+            const batchBtn = document.getElementById('batch-download-btn');
+            if (countEl) countEl.textContent = `已选 ${count} 首`;
+            if (batchBtn) batchBtn.disabled = count === 0 || batchDownloading;
+        }
+
+        function getSelectedTracks() {
+            return currentResults.filter(track => selectedTrackKeys.has(track.key));
+        }
+
+        function getDownloadSubdir() {
+            return downloadSubdirInput.value.trim();
         }
 
         // ── 试听逻辑 ─────────────────────────────────────────
@@ -1225,7 +1409,10 @@
             currentPlayingId = null;
         }
 
-        function getCard(id) { return document.getElementById(`card-${id}`); }
+        function getCard(id, source = null) {
+            if (source) return document.querySelector(`.track-card[data-key="${CSS.escape(`${source}:${id}`)}"]`);
+            return document.querySelector(`.track-card[id="${CSS.escape(`card-${id}`)}"]`);
+        }
 
         // ── Audio 事件 ───────────────────────────────────────
 
@@ -1257,7 +1444,7 @@
                 const res = await fetch('/api/lyric', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source, id, name, artist, vip: IS_VIP })
+                    body: JSON.stringify({ source, id, name, artist, vip: IS_VIP, subdir: getDownloadSubdir() })
                 });
                 const data = await res.json();
                 if (res.ok) {
@@ -1278,53 +1465,103 @@
             }
         }
 
-        async function startDownload(id, source, name, artist, album, picId, btn) {
+        async function downloadTrack(track, btn = null, showSuccessToast = true) {
             const br = qualitySelect.value;
-            const card = getCard(id);
-            const originalHTML = btn.innerHTML;
+            const card = getCard(track.id, track.source);
+            const originalHTML = btn?.innerHTML;
 
-            btn.innerHTML = SVG_LOADER;
+            if (btn) {
+                btn.innerHTML = SVG_LOADER;
+                btn.disabled = true;
+                btn.classList.add('is-loading');
+                btn.classList.remove('failed');
+            }
+            card?.classList.add('downloading');
+            card?.classList.remove('failed');
             lucide.createIcons();
-            btn.disabled = true;
-            btn.classList.add('is-loading');
-            card.classList.add('downloading');
-            card.classList.remove('failed');
 
             try {
                 const res = await fetch('/api/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source, id, name, artist, album, pic_id: picId, br, lyric: true, vip: IS_VIP })
+                    body: JSON.stringify({
+                        source: track.source,
+                        id: track.id,
+                        name: track.name,
+                        artist: track.artist,
+                        album: track.album,
+                        pic_id: track.pic_id,
+                        br,
+                        vip: IS_VIP,
+                        subdir: getDownloadSubdir()
+                    })
                 });
                 const data = await res.json();
 
                 if (res.ok) {
-                    showToast(`✅ 下载成功: ${data.filename}`, 'success');
-                    btn.classList.add('done');
-                    btn.innerHTML = SVG_CHECK;
-                    lucide.createIcons();
-                } else {
-                    showToast(data.error || '❌ 下载失败', 'error');
+                    if (showSuccessToast) showToast(`✅ 下载成功: ${data.filename}`, 'success');
+                    if (btn) {
+                        btn.classList.add('done');
+                        btn.innerHTML = SVG_CHECK;
+                        lucide.createIcons();
+                    }
+                    return { ok: true, data };
+                }
+
+                if (showSuccessToast) showToast(data.error || '❌ 下载失败', 'error');
+                if (btn) {
                     btn.disabled = false;
                     btn.classList.add('failed');
                     btn.innerHTML = SVG_CROSS;
                     lucide.createIcons();
                 }
+                return { ok: false, error: data.error || '下载失败' };
             } catch (err) {
                 console.error(err);
-                showToast('❌ 网络请求错误', 'error');
-                btn.disabled = false;
-                btn.classList.add('failed');
-                btn.innerHTML = SVG_CROSS;
-                lucide.createIcons();
-            } finally {
-                card.classList.remove('downloading');
-                btn.classList.remove('is-loading');
-                if (!btn.classList.contains('done') && !btn.classList.contains('failed')) {
-                    btn.innerHTML = originalHTML;
+                if (showSuccessToast) showToast('❌ 网络请求错误', 'error');
+                if (btn) {
                     btn.disabled = false;
+                    btn.classList.add('failed');
+                    btn.innerHTML = SVG_CROSS;
+                    lucide.createIcons();
+                }
+                return { ok: false, error: '网络请求错误' };
+            } finally {
+                card?.classList.remove('downloading');
+                if (btn) {
+                    btn.classList.remove('is-loading');
+                    if (!btn.classList.contains('done') && !btn.classList.contains('failed')) {
+                        btn.innerHTML = originalHTML;
+                        btn.disabled = false;
+                    }
                 }
             }
+        }
+
+        async function startDownload(id, source, name, artist, album, picId, btn) {
+            await downloadTrack({ id, source, name, artist, album, pic_id: picId }, btn);
+        }
+
+        async function downloadSelectedTracks() {
+            const tracks = getSelectedTracks();
+            if (tracks.length === 0 || batchDownloading) return;
+
+            batchDownloading = true;
+            updateSelectionUI();
+
+            let success = 0;
+            let failed = 0;
+            for (const track of tracks) {
+                const card = document.querySelector(`.track-card[data-key="${CSS.escape(track.key)}"]`);
+                const btn = card?.querySelector('.download-btn');
+                const result = await downloadTrack(track, btn, false);
+                if (result.ok) success += 1;
+                else failed += 1;
+            }
+
+            batchDownloading = false;
+            updateSelectionUI();
+            showToast(`批量下载完成：成功 ${success} 首，失败 ${failed} 首`, failed ? 'error' : 'success');
         }
 
         // ── Toast ─────────────────────────────────────────────

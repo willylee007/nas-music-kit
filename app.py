@@ -176,7 +176,7 @@ def get_bugpk_handler(track_id, br_or_level):
         }
     except: return None
 
-def get_gdstudio_handler(source, track_id, br, is_vip, pic_id=None):
+def get_gdstudio_handler(source, track_id, br, is_vip, pic_id=None, include_lyric=False):
     """网易云 1 (GD Studio) 专线驱动"""
     base, headers, _ = api_cfg(is_vip, source)
     try:
@@ -189,11 +189,13 @@ def get_gdstudio_handler(source, track_id, br, is_vip, pic_id=None):
         
         sz_b = u_data.get('size', 0) if isinstance(u_data, dict) else 0
         
-        # 歌词获取
-        l_p = {'types': 'lyric', 'source': source, 'id': track_id}
-        if is_vip: l_p['s'] = get_signature(track_id)
-        l_d = requests.get(base, params=l_p, headers=headers, timeout=5).json() or {}
-        
+        l_d = {}
+        if include_lyric:
+            # 歌词获取
+            l_p = {'types': 'lyric', 'source': source, 'id': track_id}
+            if is_vip: l_p['s'] = get_signature(track_id)
+            l_d = requests.get(base, params=l_p, headers=headers, timeout=5).json() or {}
+
         # 解析真正的封面图片 URL (强制请求 500x500 尺寸)
         p_id = pic_id or track_id
         sig_p = f"&s={get_signature(p_id)}" if is_vip else ""
@@ -222,15 +224,36 @@ def get_gdstudio_handler(source, track_id, br, is_vip, pic_id=None):
         }
     except: return None
 
-def fetch_music_package(source, track_id, br, is_vip, pic_id=None):
+def fetch_music_package(source, track_id, br, is_vip, pic_id=None, include_lyric=False):
     """物理隔离分发逻辑"""
     if source == 'netease2':
         return get_bugpk_handler(track_id, br)
-    return get_gdstudio_handler(source, track_id, br, is_vip, pic_id)
+    return get_gdstudio_handler(source, track_id, br, is_vip, pic_id, include_lyric)
 
 
 
 # ── 工具函数 ───────────────────────────────────────────────────────────────
+
+def _resolve_download_dir(subdir=''):
+    subdir = str(subdir or '').strip()
+    base_dir = os.path.realpath(DOWNLOAD_DIR)
+
+    if not subdir:
+        return base_dir
+    if '\x00' in subdir or os.path.isabs(subdir):
+        raise ValueError('下载目录无效')
+
+    parts = [part for part in re.split(r'[\\/]+', subdir) if part]
+    if any(part == '..' for part in parts):
+        raise ValueError('下载目录不能包含 ..')
+
+    target_dir = os.path.realpath(os.path.join(base_dir, *parts))
+    if os.path.commonpath([base_dir, target_dir]) != base_dir:
+        raise ValueError('下载目录超出允许范围')
+
+    os.makedirs(target_dir, exist_ok=True)
+    return target_dir
+
 
 def write_tags(filepath, ext, title, artist, album, cover_bytes=None, lyric_text=None):
     """
@@ -437,8 +460,13 @@ def download_lyric_endpoint():
     if not all([source, track_id, name]):
         return jsonify({'error': 'Missing required fields'}), 400
 
+    try:
+        target_dir = _resolve_download_dir(data.get('subdir', ''))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
     # 1. 获取标准化数据 (含歌词)
-    pkg = fetch_music_package(source, track_id, br='128', is_vip=is_vip, pic_id=data.get('pic_id'))
+    pkg = fetch_music_package(source, track_id, br='128', is_vip=is_vip, pic_id=data.get('pic_id'), include_lyric=True)
     lrc_content = pkg.get('lyric') if pkg else None
 
     if not lrc_content:
@@ -449,7 +477,7 @@ def download_lyric_endpoint():
     fname = f"{safe_a} - {safe_n}"
 
     try:
-        lrc_path = os.path.join(DOWNLOAD_DIR, f"{fname}.lrc")
+        lrc_path = os.path.join(target_dir, f"{fname}.lrc")
         with open(lrc_path, 'w', encoding='utf-8') as f:
             f.write(lrc_content)
         return jsonify({'status': 'success', 'filename': f"{fname}.lrc", 'path': lrc_path})
@@ -457,9 +485,14 @@ def download_lyric_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
-def _handle_download_core(source, track_id, name, artist, album, pic_id, br, download_lyric, is_vip):
+def _handle_download_core(source, track_id, name, artist, album, pic_id, br, download_lyric, is_vip, subdir=''):
     """极简线性下载流程：无分支判断，纯粹的数据处理"""
-    pkg = fetch_music_package(source, track_id, br, is_vip, pic_id)
+    try:
+        target_dir = _resolve_download_dir(subdir)
+    except ValueError as e:
+        return {'error': str(e)}, 400
+
+    pkg = fetch_music_package(source, track_id, br, is_vip, pic_id, include_lyric=download_lyric)
     if not pkg or not pkg.get('url'):
         return {'error': '无法获取下载资源'}, 404
 
@@ -486,7 +519,7 @@ def _handle_download_core(source, track_id, name, artist, album, pic_id, br, dow
             elif '.m4a' in pkg['url'].lower() or 'audio/mp4' in ctype: ext = '.m4a'
             elif not ext or ext == '.mpga': ext = '.mp3'
             
-            fpath = os.path.join(DOWNLOAD_DIR, f"{fname}{ext}")
+            fpath = os.path.join(target_dir, f"{fname}{ext}")
             with open(fpath, 'wb') as f:
                 for chunk in r.iter_content(8192): f.write(chunk)
     except Exception as e: return {'error': f'下载失败: {str(e)}'}, 500
@@ -496,7 +529,7 @@ def _handle_download_core(source, track_id, name, artist, album, pic_id, br, dow
     res = {'status': 'success', 'filename': f"{fname}{ext}", 'bitrate': br, 'tags': 'ok' if tag_ok else 'err'}
     
     if download_lyric and pkg.get('lyric'):
-        with open(os.path.join(DOWNLOAD_DIR, f"{fname}.lrc"), 'w', encoding='utf-8') as f:
+        with open(os.path.join(target_dir, f"{fname}.lrc"), 'w', encoding='utf-8') as f:
             f.write(pkg['lyric'])
     return res, 200
 
@@ -507,7 +540,8 @@ def download():
         source=data.get('source'), track_id=data.get('id'), name=data.get('name'),
         artist=data.get('artist', 'Unknown'), album=data.get('album', ''),
         pic_id=data.get('pic_id', ''), br=data.get('br', 999),
-        download_lyric=data.get('lyric', False), is_vip=data.get('vip', False)
+        download_lyric=data.get('lyric', False), is_vip=data.get('vip', False),
+        subdir=data.get('subdir', '')
     )
     return jsonify(res), code
 
@@ -723,7 +757,8 @@ def workflow_endpoint():
     text = request.args.get('text', '')
     br = request.args.get('br', '999')
     is_vip = request.args.get('vip') == '1'
-    
+    subdir = request.args.get('subdir', '')
+
     url = extract_url(text)
     if not url:
         return jsonify({'error': '未能识别出链接'}), 400
@@ -752,8 +787,9 @@ def workflow_endpoint():
         album=info.get('album'),
         pic_id=info.get('pic_id'),
         br=br,
-        download_lyric=True,
-        is_vip=is_vip
+        download_lyric=False,
+        is_vip=is_vip,
+        subdir=subdir
     )
     return jsonify(res), code
 
