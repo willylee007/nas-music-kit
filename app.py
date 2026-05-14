@@ -15,6 +15,9 @@ from mutagen.mp4 import MP4, MP4Cover
 
 app = Flask(__name__, template_folder='.', static_folder='static', static_url_path='/static')
 
+download_executor = ThreadPoolExecutor(max_workers=3)
+download_jobs = {}
+
 # 下载目录：支持 ~/ 路径展开
 DOWNLOAD_DIR = os.path.expanduser(os.environ.get('DOWNLOAD_DIR', '/music'))
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -382,12 +385,14 @@ def search():
     source  = request.args.get('source', 'netease')
     keyword = request.args.get('name', '')
     page    = request.args.get('pages', 1)
+    search_type = request.args.get('search_type', 'song')
     is_vip  = request.args.get('vip') == '1'
 
     if not keyword:
         return jsonify({'error': 'Keyword is required'}), 400
 
-    base, headers, is_bugpk = api_cfg(is_vip, source)
+    search_base_source = 'netease' if search_type == 'album' and source == 'netease2' else source
+    base, headers, is_bugpk = api_cfg(is_vip, search_base_source)
     try:
         try:
             count = int(request.args.get('count', 20))
@@ -395,10 +400,11 @@ def search():
         except:
             count, page = 20, 1
             
+        search_source = f'{search_base_source}_album' if search_type == 'album' else search_base_source
         if is_bugpk:
             params = {'type': 'search', 'keywords': keyword, 'limit': count, 'offset': (page - 1) * count}
         else:
-            params = {'types': 'search', 'source': source, 'name': keyword, 'count': count, 'pages': page}
+            params = {'types': 'search', 'source': search_source, 'name': keyword, 'count': count, 'pages': page}
             if is_vip: params['s'] = get_signature(keyword)
             
         resp = requests.get(base, params=params, headers=headers, timeout=10)
@@ -422,7 +428,7 @@ def search():
                 results = data[:count]
         
         for item in results:
-            if 'source' not in item: item['source'] = source
+            item['source'] = search_base_source
 
         return jsonify(results)
     except Exception as e:
@@ -485,16 +491,22 @@ def download_lyric_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
-def _handle_download_core(source, track_id, name, artist, album, pic_id, br, download_lyric, is_vip, subdir=''):
+def _handle_download_core(source, track_id, name, artist, album, pic_id, br, download_lyric, is_vip, subdir='', progress_callback=None):
     """极简线性下载流程：无分支判断，纯粹的数据处理"""
+    def report(progress, status=None):
+        if progress_callback:
+            progress_callback(progress, status)
+
     try:
         target_dir = _resolve_download_dir(subdir)
     except ValueError as e:
         return {'error': str(e)}, 400
 
+    report(2, 'queued')
     pkg = fetch_music_package(source, track_id, br, is_vip, pic_id, include_lyric=download_lyric)
     if not pkg or not pkg.get('url'):
         return {'error': '无法获取下载资源'}, 404
+    report(5, 'downloading')
 
     # 清洗音频与封面
     cover_bytes = None
@@ -511,27 +523,109 @@ def _handle_download_core(source, track_id, name, artist, album, pic_id, br, dow
         with requests.get(pkg['url'], headers=MEDIA_HEADERS, stream=True, timeout=60) as r:
             if r.status_code != 200:
                 return {'error': f'CDN 响应错误: {r.status_code}'}, r.status_code
-                
+
             # 扩展名识别
             ctype = r.headers.get('content-type', '').lower()
             ext = mimetypes.guess_extension(ctype)
             if '.flac' in pkg['url'].lower() or 'audio/flac' in ctype: ext = '.flac'
             elif '.m4a' in pkg['url'].lower() or 'audio/mp4' in ctype: ext = '.m4a'
             elif not ext or ext == '.mpga': ext = '.mp3'
-            
+
             fpath = os.path.join(target_dir, f"{fname}{ext}")
+            try:
+                total = int(r.headers.get('content-length') or 0)
+            except ValueError:
+                total = 0
+            downloaded = 0
+            fallback_progress = 5
             with open(fpath, 'wb') as f:
-                for chunk in r.iter_content(8192): f.write(chunk)
+                for chunk in r.iter_content(8192):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        report(min(95, 5 + int(downloaded / total * 90)), 'downloading')
+                    elif fallback_progress < 90:
+                        fallback_progress += 1
+                        report(fallback_progress, 'downloading')
     except Exception as e: return {'error': f'下载失败: {str(e)}'}, 500
 
     # 写入标签与歌词文件
+    report(96, 'tagging')
     tag_ok = write_tags(fpath, ext, name, artist, album, cover_bytes, pkg.get('lyric') if download_lyric else None)
     res = {'status': 'success', 'filename': f"{fname}{ext}", 'bitrate': br, 'tags': 'ok' if tag_ok else 'err'}
-    
+
     if download_lyric and pkg.get('lyric'):
         with open(os.path.join(target_dir, f"{fname}.lrc"), 'w', encoding='utf-8') as f:
             f.write(pkg['lyric'])
+    report(100, 'success')
     return res, 200
+
+def _cleanup_download_jobs():
+    now = time.time()
+    expired = [job_id for job_id, job in download_jobs.items() if now - job.get('created_at', now) > 1800]
+    for job_id in expired:
+        download_jobs.pop(job_id, None)
+
+
+def _update_download_job(job_id, progress=None, status=None, **extra):
+    job = download_jobs.get(job_id)
+    if not job:
+        return
+    if progress is not None:
+        job['progress'] = max(job.get('progress', 0), min(100, int(progress)))
+    if status:
+        job['status'] = status
+    job.update(extra)
+
+
+def _run_download_job(job_id, data):
+    def progress_callback(progress, status=None):
+        _update_download_job(job_id, progress, status)
+
+    res, code = _handle_download_core(
+        source=data.get('source'), track_id=data.get('id'), name=data.get('name'),
+        artist=data.get('artist', 'Unknown'), album=data.get('album', ''),
+        pic_id=data.get('pic_id', ''), br=data.get('br', 999),
+        download_lyric=data.get('lyric', False), is_vip=data.get('vip', False),
+        subdir=data.get('subdir', ''), progress_callback=progress_callback
+    )
+    if code == 200:
+        _update_download_job(job_id, 100, 'success', filename=res.get('filename'), result=res)
+    else:
+        _update_download_job(job_id, None, 'error', error=res.get('error', '下载失败'), result=res)
+
+
+@app.route('/api/download/start', methods=['POST'])
+def start_download_job():
+    _cleanup_download_jobs()
+    data = request.json or {}
+    job_id = hashlib.md5(f"{time.time()}-{data.get('id')}-{data.get('source')}".encode()).hexdigest()
+    download_jobs[job_id] = {
+        'status': 'queued',
+        'progress': 0,
+        'filename': '',
+        'error': '',
+        'created_at': time.time()
+    }
+    download_executor.submit(_run_download_job, job_id, data)
+    return jsonify({'job_id': job_id})
+
+
+@app.route('/api/download/progress/<job_id>')
+def download_progress(job_id):
+    job = download_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': '任务不存在'}), 404
+    return jsonify({
+        'status': job.get('status'),
+        'progress': job.get('progress', 0),
+        'filename': job.get('filename', ''),
+        'error': job.get('error', ''),
+        'result': job.get('result')
+    })
+
 
 @app.route('/api/download', methods=['POST'])
 def download():
