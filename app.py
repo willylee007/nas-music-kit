@@ -6,6 +6,7 @@ import hashlib
 import time
 import re
 import functools
+import json
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, request, jsonify, redirect, send_from_directory
 
@@ -17,6 +18,8 @@ app = Flask(__name__, template_folder='.', static_folder='static', static_url_pa
 
 download_executor = ThreadPoolExecutor(max_workers=3)
 download_jobs = {}
+DOWNLOAD_JOB_DIR = os.environ.get('DOWNLOAD_JOB_DIR', '/tmp/nas-music-kit-jobs')
+os.makedirs(DOWNLOAD_JOB_DIR, exist_ok=True)
 
 # 下载目录：支持 ~/ 路径展开
 DOWNLOAD_DIR = os.path.expanduser(os.environ.get('DOWNLOAD_DIR', '/music'))
@@ -38,6 +41,13 @@ API_HEADERS = {
     'X-Requested-With': 'XMLHttpRequest'
 }
 
+HTTP_PROXY = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+REQUEST_PROXIES = {'http': HTTP_PROXY, 'https': HTTP_PROXY} if HTTP_PROXY else None
+
+
+def http_get(url, **kwargs):
+    return requests.get(url, proxies=REQUEST_PROXIES, **kwargs)
+
 # 资源请求头 (用于下载音频)
 MEDIA_HEADERS = {
     'User-Agent': API_HEADERS['User-Agent'],
@@ -52,7 +62,7 @@ def get_signature(id_str: str):
     ver_padded = "".join([p.zfill(2) if len(p) == 1 else p for p in ver_parts])
     
     try:
-        ts_resp = requests.get("https://www.ximalaya.com/revision/time", timeout=3)
+        ts_resp = http_get("https://www.ximalaya.com/revision/time", timeout=3)
         ts_val = ts_resp.text[:9]
     except:
         ts_val = str(int(time.time() * 1000))[:9]
@@ -92,7 +102,7 @@ def resolve_url(url: str):
     """还原短链接获取真实地址"""
     try:
         # 使用 GET (stream=True) 比 HEAD 更稳定，且只获取 Header 不下载 Body
-        resp = requests.get(url, headers=API_HEADERS, allow_redirects=True, timeout=5, stream=True)
+        resp = http_get(url, headers=API_HEADERS, allow_redirects=True, timeout=5, stream=True)
         real_url = resp.url
         resp.close() # 及时关闭流连接
         return real_url
@@ -159,7 +169,7 @@ def get_bugpk_handler(track_id, br_or_level):
     level = lv_map.get(str(br_or_level), br_or_level)
     try:
         # 使用核心 json 接口，一次性获取元数据、链接、码率、大小、歌词
-        resp = requests.get(API_BUGPK, params={'type': 'json', 'ids': track_id, 'level': level}, timeout=10).json()
+        resp = http_get(API_BUGPK, params={'type': 'json', 'ids': track_id, 'level': level}, timeout=10).json()
         # 兼容性处理：部分版本返回 code，部分返回 status；部分有 data 包装，部分没有
         is_success = resp.get('code') == 200 or resp.get('status') == 200
         item = resp.get('data', resp) if is_success else {}
@@ -186,7 +196,7 @@ def get_gdstudio_handler(source, track_id, br, is_vip, pic_id=None, include_lyri
         # 链接获取
         p = {'types': 'url', 'source': source, 'id': track_id, 'br': br}
         if is_vip: p['s'] = get_signature(track_id)
-        u_data = requests.get(base, params=p, headers=headers, timeout=10).json() or {}
+        u_data = http_get(base, params=p, headers=headers, timeout=10).json() or {}
         url = normalize_url(u_data if isinstance(u_data, str) else u_data.get('url'), source)
         if not url: return None
         
@@ -197,14 +207,14 @@ def get_gdstudio_handler(source, track_id, br, is_vip, pic_id=None, include_lyri
             # 歌词获取
             l_p = {'types': 'lyric', 'source': source, 'id': track_id}
             if is_vip: l_p['s'] = get_signature(track_id)
-            l_d = requests.get(base, params=l_p, headers=headers, timeout=5).json() or {}
+            l_d = http_get(base, params=l_p, headers=headers, timeout=5).json() or {}
 
         # 解析真正的封面图片 URL (强制请求 500x500 尺寸)
         p_id = pic_id or track_id
         sig_p = f"&s={get_signature(p_id)}" if is_vip else ""
         p_u = f"{base}?types=pic&source={source}&id={p_id}&size=500{sig_p}"
         try:
-            p_res = requests.get(p_u, headers=headers, timeout=5).json()
+            p_res = http_get(p_u, headers=headers, timeout=5).json()
             pic_proxy = p_res.get('url') if isinstance(p_res, dict) else None
         except: pic_proxy = None
 
@@ -349,7 +359,7 @@ def cover():
         # 1. 针对新版网易云 (netease2) 
         if is_bugpk:
             # BugPk 使用综合接口 type=json，支持 ids
-            resp = requests.get(base, params={'type': 'json', 'ids': pic_id}, headers=headers, timeout=8)
+            resp = http_get(base, params={'type': 'json', 'ids': pic_id}, headers=headers, timeout=8)
             data = resp.json()
             if data.get('code') == 200 or data.get('status') == 200:
                 d = data.get('data', data)
@@ -360,7 +370,7 @@ def cover():
             params = {'types': 'pic', 'source': source, 'id': pic_id, 'size': 500}
             if is_vip: params['s'] = get_signature(pic_id)
             
-            resp = requests.get(base, params=params, headers=headers, timeout=8)
+            resp = http_get(base, params=params, headers=headers, timeout=8)
             data = resp.json()
             
             if isinstance(data, dict):
@@ -368,7 +378,7 @@ def cover():
         
         if img_url:
             # 代理图片，解决移动端 Referer/Mixed Content 问题
-            img_resp = requests.get(img_url, headers=MEDIA_HEADERS, timeout=10)
+            img_resp = http_get(img_url, headers=MEDIA_HEADERS, timeout=10)
             if img_resp.status_code == 200:
                 return img_resp.content, 200, {
                     'Content-Type': img_resp.headers.get('Content-Type', 'image/jpeg'),
@@ -407,7 +417,7 @@ def search():
             params = {'types': 'search', 'source': search_source, 'name': keyword, 'count': count, 'pages': page}
             if is_vip: params['s'] = get_signature(keyword)
             
-        resp = requests.get(base, params=params, headers=headers, timeout=10)
+        resp = http_get(base, params=params, headers=headers, timeout=10)
         data = resp.json()
         
         results = []
@@ -497,31 +507,45 @@ def _handle_download_core(source, track_id, name, artist, album, pic_id, br, dow
         if progress_callback:
             progress_callback(progress, status)
 
+    print(f"[download] start source={source} id={track_id} br={br} subdir={subdir!r} lyric={download_lyric}", flush=True)
     try:
         target_dir = _resolve_download_dir(subdir)
+        st = os.stat(target_dir)
+        print(
+            f"[download] target_dir={target_dir} writable={os.access(target_dir, os.W_OK)} "
+            f"uid={os.getuid()} gid={os.getgid()} dir_uid={st.st_uid} dir_gid={st.st_gid} mode={oct(st.st_mode & 0o777)}",
+            flush=True
+        )
     except ValueError as e:
+        print(f"[download] invalid subdir error={e}", flush=True)
         return {'error': str(e)}, 400
 
     report(2, 'queued')
     pkg = fetch_music_package(source, track_id, br, is_vip, pic_id, include_lyric=download_lyric)
     if not pkg or not pkg.get('url'):
+        print(f"[download] resource failed source={source} id={track_id}", flush=True)
         return {'error': '无法获取下载资源'}, 404
+    print(f"[download] resource ok size={pkg.get('size', '')} level={pkg.get('level_text', '')} url_host={urllib.parse.urlparse(pkg.get('url')).netloc}", flush=True)
     report(5, 'downloading')
 
     # 清洗音频与封面
     cover_bytes = None
     if pkg.get('pic_url'):
         try:
-            img_r = requests.get(pkg['pic_url'], headers=MEDIA_HEADERS, timeout=10)
+            img_r = http_get(pkg['pic_url'], headers=MEDIA_HEADERS, timeout=10)
+            print(f"[download] cover status={img_r.status_code} host={urllib.parse.urlparse(pkg.get('pic_url')).netloc}", flush=True)
             if img_r.status_code == 200: cover_bytes = img_r.content
-        except: pass
+        except Exception as e:
+            print(f"[download] cover failed error={e}", flush=True)
 
     # 下载音频
     safe_n, safe_a = re.sub(r'[\\/:*?"<>|]', '', str(name)), re.sub(r'[\\/:*?"<>|]', '', str(artist))
     fname = f"{safe_a} - {safe_n}"
     try:
-        with requests.get(pkg['url'], headers=MEDIA_HEADERS, stream=True, timeout=60) as r:
+        with http_get(pkg['url'], headers=MEDIA_HEADERS, stream=True, timeout=60) as r:
+            print(f"[download] audio status={r.status_code} content_type={r.headers.get('content-type', '')} length={r.headers.get('content-length', '')}", flush=True)
             if r.status_code != 200:
+                print(f"[download] audio failed status={r.status_code}", flush=True)
                 return {'error': f'CDN 响应错误: {r.status_code}'}, r.status_code
 
             # 扩展名识别
@@ -532,6 +556,7 @@ def _handle_download_core(source, track_id, name, artist, album, pic_id, br, dow
             elif not ext or ext == '.mpga': ext = '.mp3'
 
             fpath = os.path.join(target_dir, f"{fname}{ext}")
+            print(f"[download] write start path={fpath}", flush=True)
             try:
                 total = int(r.headers.get('content-length') or 0)
             except ValueError:
@@ -549,28 +574,76 @@ def _handle_download_core(source, track_id, name, artist, album, pic_id, br, dow
                     elif fallback_progress < 90:
                         fallback_progress += 1
                         report(fallback_progress, 'downloading')
-    except Exception as e: return {'error': f'下载失败: {str(e)}'}, 500
+            print(f"[download] write ok path={fpath} bytes={downloaded}", flush=True)
+    except Exception as e:
+        parent_dir = locals().get('target_dir', '')
+        print(
+            f"[download] failed stage=audio/write error={e} "
+            f"path={locals().get('fpath', '')} parent_writable={os.access(parent_dir, os.W_OK) if parent_dir else False}",
+            flush=True
+        )
+        return {'error': f'下载失败: {str(e)}'}, 500
 
     # 写入标签与歌词文件
     report(96, 'tagging')
     tag_ok = write_tags(fpath, ext, name, artist, album, cover_bytes, pkg.get('lyric') if download_lyric else None)
+    print(f"[download] tags status={'ok' if tag_ok else 'err'} path={fpath}", flush=True)
     res = {'status': 'success', 'filename': f"{fname}{ext}", 'bitrate': br, 'tags': 'ok' if tag_ok else 'err'}
 
     if download_lyric and pkg.get('lyric'):
-        with open(os.path.join(target_dir, f"{fname}.lrc"), 'w', encoding='utf-8') as f:
+        lrc_path = os.path.join(target_dir, f"{fname}.lrc")
+        with open(lrc_path, 'w', encoding='utf-8') as f:
             f.write(pkg['lyric'])
+        print(f"[download] lyric ok path={lrc_path}", flush=True)
     report(100, 'success')
+    print(f"[download] success filename={res['filename']} path={fpath}", flush=True)
     return res, 200
+
+def _download_job_path(job_id):
+    safe_job_id = re.sub(r'[^a-fA-F0-9]', '', str(job_id))
+    return os.path.join(DOWNLOAD_JOB_DIR, f'{safe_job_id}.json')
+
+
+def _read_download_job(job_id):
+    job = download_jobs.get(job_id)
+    if job:
+        return job
+    try:
+        with open(_download_job_path(job_id), 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        print(f"[download-job] read failed job_id={job_id} error={e}", flush=True)
+        return None
+
+
+def _write_download_job(job_id, job):
+    path = _download_job_path(job_id)
+    tmp_path = f'{path}.tmp.{os.getpid()}'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(job, f, ensure_ascii=False)
+    os.replace(tmp_path, path)
+
 
 def _cleanup_download_jobs():
     now = time.time()
     expired = [job_id for job_id, job in download_jobs.items() if now - job.get('created_at', now) > 1800]
     for job_id in expired:
         download_jobs.pop(job_id, None)
+    try:
+        for filename in os.listdir(DOWNLOAD_JOB_DIR):
+            if not filename.endswith('.json'):
+                continue
+            path = os.path.join(DOWNLOAD_JOB_DIR, filename)
+            if now - os.path.getmtime(path) > 1800:
+                os.remove(path)
+    except Exception as e:
+        print(f"[download-job] cleanup failed error={e}", flush=True)
 
 
 def _update_download_job(job_id, progress=None, status=None, **extra):
-    job = download_jobs.get(job_id)
+    job = _read_download_job(job_id)
     if not job:
         return
     if progress is not None:
@@ -578,12 +651,15 @@ def _update_download_job(job_id, progress=None, status=None, **extra):
     if status:
         job['status'] = status
     job.update(extra)
+    download_jobs[job_id] = job
+    _write_download_job(job_id, job)
 
 
 def _run_download_job(job_id, data):
     def progress_callback(progress, status=None):
         _update_download_job(job_id, progress, status)
 
+    print(f"[download-job] start job_id={job_id}", flush=True)
     res, code = _handle_download_core(
         source=data.get('source'), track_id=data.get('id'), name=data.get('name'),
         artist=data.get('artist', 'Unknown'), album=data.get('album', ''),
@@ -592,8 +668,10 @@ def _run_download_job(job_id, data):
         subdir=data.get('subdir', ''), progress_callback=progress_callback
     )
     if code == 200:
+        print(f"[download-job] success job_id={job_id} filename={res.get('filename')}", flush=True)
         _update_download_job(job_id, 100, 'success', filename=res.get('filename'), result=res)
     else:
+        print(f"[download-job] error job_id={job_id} code={code} error={res.get('error', '下载失败')}", flush=True)
         _update_download_job(job_id, None, 'error', error=res.get('error', '下载失败'), result=res)
 
 
@@ -609,13 +687,14 @@ def start_download_job():
         'error': '',
         'created_at': time.time()
     }
+    _write_download_job(job_id, download_jobs[job_id])
     download_executor.submit(_run_download_job, job_id, data)
     return jsonify({'job_id': job_id})
 
 
 @app.route('/api/download/progress/<job_id>')
 def download_progress(job_id):
-    job = download_jobs.get(job_id)
+    job = _read_download_job(job_id)
     if not job:
         return jsonify({'error': '任务不存在'}), 404
     return jsonify({
@@ -831,7 +910,7 @@ def get_music_info_for_workflow(source, track_id, is_vip, br='999'):
         base, headers, _ = api_cfg(is_vip, source)
         params = {'types': 'search', 'source': source, 'name': track_id, 'count': 5}
         if is_vip: params['s'] = get_signature(track_id)
-        resp = requests.get(base, params=params, headers=headers, timeout=5).json()
+        resp = http_get(base, params=params, headers=headers, timeout=5).json()
         if isinstance(resp, list):
             for item in resp:
                 if str(item.get('id')) == str(track_id):
