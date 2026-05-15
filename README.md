@@ -33,8 +33,7 @@
 ```yaml
 services:
   nas-music-kit:
-    image: ghcr.io/juneix/nas-music-kit
-    # image: docker.1ms.run/juneix/nas-music-kit  # 毫秒镜像加速
+    image: willylee00/nas-music-kit:latest
     container_name: nas-music-kit
     network_mode: host
     restart: unless-stopped
